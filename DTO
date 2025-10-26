@@ -1,0 +1,136 @@
+package edu.nu.owaspapivulnlab.web.dto;
+
+public class UserResponse {
+    private Long id;
+    private String username;
+    private String email;
+
+    public UserResponse() {}
+
+    public UserResponse(Long id, String username, String email) {
+        this.id = id;
+        this.username = username;
+        this.email = email;
+    }
+
+    public Long getId() { return id; }
+    public String getUsername() { return username; }
+    public String getEmail() { return email; }
+
+    public void setId(Long id) { this.id = id; }
+    public void setUsername(String username) { this.username = username; }
+    public void setEmail(String email) { this.email = email; }
+}
+package edu.nu.owaspapivulnlab.web.dto;
+
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+
+public class UserCreateRequest {
+    @NotBlank
+    @Size(min = 3, max = 50)
+    private String username;
+
+    @Email
+    @NotBlank
+    private String email;
+
+    @NotBlank
+    @Size(min = 6, max = 100)
+    private String password;
+
+    public String getUsername() { return username; }
+    public void setUsername(String username) { this.username = username; }
+
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
+}
+ces.login.limit-refresh-period=1m
+resilience4j.ratelimiter.instances.login.timeout-duration=0
+
+resilience4j.ratelimiter.instances.transfer.limit-for-period=10
+resilience4j.ratelimiter.instances.transfer.limit-refresh-period=1m
+resilience4j.ratelimiter.instances.transfer.timeout-duration=0
+package edu.nu.owaspapivulnlab.web.dto;
+
+public class AccountResponse {
+    private Long id;
+    private String iban;
+    private Double balance;
+
+    public AccountResponse() {}
+
+    public AccountResponse(Long id, String iban, Double balance) {
+        this.id = id;
+        this.iban = iban;
+        this.balance = balance;
+    }
+
+    public Long getId() { return id; }
+    public String getIban() { return iban; }
+    public Double getBalance() { return balance; }
+
+    public void setId(Long id) { this.id = id; }
+    public void setIban(String iban) { this.iban = iban; }
+    public void setBalance(Double balance) { this.balance = balance; }
+}
+sult.MockMvcResultMatchers.*;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+class AdditionalSecurityExpectationsTests {
+
+    @Autowired MockMvc mvc;
+    @Autowired ObjectMapper om;
+
+    String login(String user, String pw) throws Exception {
+        String res = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\""+user+"\",\"password\":\""+pw+"\"}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        JsonNode n = om.readTree(res);
+        return n.get("token").asText();
+    }
+
+    @Test
+    void protected_endpoints_require_authentication() throws Exception {
+        mvc.perform(get("/api/users"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void delete_user_requires_admin() throws Exception {
+        String tUser = login("alice","alice123");
+        mvc.perform(delete("/api/users/1").header("Authorization","Bearer "+tUser))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void create_user_ignores_role_and_returns_dto() throws Exception {
+        String payload = "{\"username\":\"eve2\",\"password\":\"pwStrong1\",\"email\":\"e2@e\",\"role\":\"ADMIN\",\"isAdmin\":true}";
+        mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON).content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.password").doesNotExist())
+                .andExpect(jsonPath("$.role").doesNotExist())
+                .andExpect(jsonPath("$.isAdmin").doesNotExist())
+                .andExpect(jsonPath("$.username", is("eve2")));
+    }
+
+    @Test
+    void jwt_must_match_issuer_and_audience() throws Exception {
+        String token = login("alice","alice123");
+        mvc.perform(get("/api/accounts/mine").header("Authorization","Bearer "+token))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void account_balance_requires_owner() throws Exception {
+        String alice = login("alice","alice123");
+        mvc.perform(get("/api/accounts/2/balance").header("Authorization","Bearer "+alice))
+                .andExpect(status().isForbidden());
+    }
+}
