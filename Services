@@ -1,0 +1,97 @@
+package edu.nu.owaspapivulnlab.service;
+
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import java.security.Key;
+import java.util.Date;
+import java.util.Map;
+
+@Service
+public class JwtService {
+
+    @Value("${app.jwt.secret}")
+    private String secret;
+
+    @Value("${app.jwt.ttl-seconds}")
+    private long ttlSeconds;
+
+    @Value("${app.jwt.issuer}")
+    private String issuer;
+
+    @Value("${app.jwt.audience}")
+    private String audience;
+
+
+    // VULNERABILITY(API8): HS256 with trivial key, long TTL, missing issuer/audience
+    public String issue(String subject, Map<String, Object> claims) {
+        long now = System.currentTimeMillis();
+        Key key = Keys.hmacShaKeyFor(secret.getBytes());
+        return Jwts.builder()
+                .setSubject(subject)
+                .addClaims(claims)
+                .setIssuedAt(new Date(now))
+                .setExpiration(new Date(now + ttlSeconds * 1000))
+                .setIssuer(issuer)
+                .setAudience(audience)
+                .signWith(key, SignatureAlgorithm.HS256)
+                .compact();
+    }
+}ication auth) {
+        AppUser me = users.findByUsername(auth.getName()).orElseThrow(() -> new RuntimeException("User not found"));
+        if (!id.equals(me.getId())) {
+            return ResponseEntity.status(403).build();
+        }
+        UserResponse dto = new UserResponse(me.getId(), me.getUsername(), me.getEmail());
+        return ResponseEntity.ok(dto);
+    }
+
+    // VULNERABILITY(API6: Mass Assignment) - binds role/isAdmin from client
+    @PostMapping
+    @PreAuthorize("permitAll()")
+    public ResponseEntity<UserResponse> create(@Valid @RequestBody UserCreateRequest body) {
+        AppUser toSave = AppUser.builder()
+                .username(body.getUsername())
+                .password(passwordEncoder.encode(body.getPassword()))
+                .email(body.getEmail())
+                .role("USER")
+                .isAdmin(false)
+                .build();
+        AppUser created = users.save(toSave);
+        UserResponse dto = new UserResponse(created.getId(), created.getUsername(), created.getEmail());
+        return ResponseEntity.status(201).body(dto);
+    }
+
+    // VULNERABILITY(API9: Improper Inventory + API8 Injection style): naive 'search' that can be abused for enumeration
+    @GetMapping("/search")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<List<UserResponse>> search(@RequestParam String q) {
+        List<UserResponse> dtos = users.search(q).stream()
+                .map(u -> new UserResponse(u.getId(), u.getUsername(), u.getEmail()))
+                .toList();
+        return ResponseEntity.ok(dtos);
+    }
+
+    // VULNERABILITY(API3: Excessive Data Exposure) - returns all users including sensitive fields
+    @GetMapping
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<List<UserResponse>> list() {
+        List<UserResponse> dtos = users.findAll().stream()
+                .map(u -> new UserResponse(u.getId(), u.getUsername(), u.getEmail()))
+                .toList();
+        return ResponseEntity.ok(dtos);
+    }
+
+    // VULNERABILITY(API5: Broken Function Level Authorization) - allows regular users to delete anyone
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<?> delete(@PathVariable Long id) {
+        users.deleteById(id);
+        Map<String, String> response = new HashMap<>();
+        response.put("status", "deleted");
+        return ResponseEntity.ok(response);
+    }
+}
