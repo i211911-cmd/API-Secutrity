@@ -1,0 +1,28 @@
+# H2 + JPA
+spring.datasource.url=jdbc:h2:mem:apilab;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+spring.datasource.driverClassName=org.h2.Driver
+spring.datasource.username=sa
+spring.datasource.password=
+spring.jpa.hibernate.ddl-auto=update
+spring.h2.console.enabled=true
+
+# JWT hardening (override via environment in production)
+app.jwt.secret=${APP_JWT_SECRET:change-me-please-32-bytes-minimum-secret-key}
+app.jwt.ttl-seconds=${APP_JWT_TTL_SECONDS:600}
+app.jwt.issuer=owasp-lab
+app.jwt.audience=owasp-clients
+
+# Limit error detail in responses (prod-safe defaults)
+server.error.include-message=never
+server.error.include-stacktrace=never
+
+logging.level.root=INFO
+
+# Resilience4j rate limiters
+resilience4j.ratelimiter.instances.login.limit-for-period=5
+resilience4j.ratelimiter.instances.login.limit-refresh-period=1m
+resilience4j.ratelimiter.instances.login.timeout-duration=0
+
+resilience4j.ratelimiter.instances.transfer.limit-for-period=10
+resilience4j.ratelimiter.instances.transfer.limit-refresh-period=1m
+resilience4j.ratelimiter.instances.transfer.timeout-duration=0
