@@ -1,0 +1,92 @@
+package edu.nu.owaspapivulnlab.web;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.NotNull;
+import edu.nu.owaspapivulnlab.model.Account;
+import edu.nu.owaspapivulnlab.model.AppUser;
+import edu.nu.owaspapivulnlab.repo.AccountRepository;
+import edu.nu.owaspapivulnlab.repo.AppUserRepository;
+import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
+
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.List;
+import java.util.stream.Collectors;
+import edu.nu.owaspapivulnlab.web.dto.AccountResponse;
+
+@RestController
+@RequestMapping("/api/accounts")
+public class AccountController {
+
+    private final AccountRepository accounts;
+    private final AppUserRepository users;
+
+    public AccountController(AccountRepository accounts, AppUserRepository users) {
+        this.accounts = accounts;
+        this.users = users;
+    }
+
+    // VULNERABILITY(API1: BOLA) - no check whether account belongs to caller
+    @GetMapping("/{id}/balance")
+    public ResponseEntity<?> balance(@PathVariable Long id, Authentication auth) {
+        Account a = accounts.findById(id).orElseThrow(() -> new RuntimeException("Account not found"));
+        if (auth == null || auth.getName() == null) {
+            return ResponseEntity.status(401).build();
+        }
+        AppUser me = users.findByUsername(auth.getName()).orElse(null);
+        if (me == null) {
+            return ResponseEntity.status(401).build();
+        }
+        if (!a.getOwnerUserId().equals(me.getId())) {
+            return ResponseEntity.status(403).build();
+        }
+        return ResponseEntity.ok(a.getBalance());
+    }
+
+    // VULNERABILITY(API4: Unrestricted Resource Consumption) - no rate limiting on transfer
+    // VULNERABILITY(API5/1): no authorization check on owner
+    @PostMapping("/{id}/transfer")
+    @RateLimiter(name = "transfer")
+    public ResponseEntity<?> transfer(@PathVariable Long id, @RequestParam @NotNull @Positive Double amount, Authentication auth) {
+        if (amount <= 0 || amount > 1_000_000) {
+            return ResponseEntity.badRequest().body(Collections.singletonMap("error", "invalid amount"));
+        }
+        if (auth == null || auth.getName() == null) {
+            return ResponseEntity.status(401).build();
+        }
+        Account a = accounts.findById(id).orElseThrow(() -> new RuntimeException("Account not found"));
+        AppUser me = users.findByUsername(auth.getName()).orElse(null);
+        if (me == null || !a.getOwnerUserId().equals(me.getId())) {
+            return ResponseEntity.status(403).build();
+        }
+        if (a.getBalance() < amount) {
+            return ResponseEntity.badRequest().body(Collections.singletonMap("error", "insufficient funds"));
+        }
+        a.setBalance(a.getBalance() - amount);
+        accounts.save(a);
+        Map<String, Object> response = new HashMap<>();
+        response.put("status", "ok");
+        response.put("remaining", a.getBalance());
+        return ResponseEntity.ok(response);
+    }
+
+    // Safe-ish helper to view my accounts (still leaks more than needed)
+    @GetMapping("/mine")
+    public ResponseEntity<List<AccountResponse>> mine(Authentication auth) {
+        if (auth == null || auth.getName() == null) {
+            return ResponseEntity.status(401).build();
+        }
+        AppUser me = users.findByUsername(auth.getName()).orElse(null);
+        if (me == null) {
+            return ResponseEntity.status(401).build();
+        }
+        List<AccountResponse> dtos = accounts.findByOwnerUserId(me.getId()).stream()
+                .map(a -> new AccountResponse(a.getId(), a.getIban(), a.getBalance()))
+                .collect(Collectors.toList());
+        return ResponseEntity.ok(dtos);
+    }
+}
